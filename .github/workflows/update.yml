@@ -111,6 +111,14 @@ jobs:
           printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur_ci
           chmod 600 ~/.ssh/aur_ci
           printf '%s\n' "$AUR_HOST_KEY" > ~/.ssh/aur_known_hosts
+          echo "::group::SSH key diagnostics"
+          echo "AUR_SSH_KEY length: ${#AUR_SSH_KEY}"
+          head -n1 ~/.ssh/aur_ci
+          ssh-keygen -l -f ~/.ssh/aur_ci || true
+          ssh -vv -i ~/.ssh/aur_ci -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/aur_known_hosts" \
+            -o StrictHostKeyChecking=yes -T aur@aur.archlinux.org 2>&1 | tail -n 30 || true
+          echo "::endgroup::"
           export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_ci -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/aur_known_hosts -o StrictHostKeyChecking=yes"
           rm -rf /tmp/aur-pkg
           git clone --depth=1 "ssh://aur@aur.archlinux.org/${PKGNAME}.git" /tmp/aur-pkg
