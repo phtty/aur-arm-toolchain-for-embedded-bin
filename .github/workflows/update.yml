@@ -1,0 +1,139 @@
+name: Update AUR package
+
+on:
+  schedule:
+    # 每周一 04:23 UTC 自动检查上游
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Force a specific ATfE version (e.g. 23.1.0); leave empty for latest'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aur-update
+  cancel-in-progress: false
+
+env:
+  PKGNAME: arm-toolchain-for-embedded-bin
+  UPSTREAM_REPO: arm/arm-toolchain
+  # 固定 AUR 主机公钥（ed25519），避免 TOFU
+  AUR_HOST_KEY: 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine upstream version
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$FORCED" ]; then
+            ver="$FORCED"
+          else
+            ver=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+                    "https://api.github.com/repos/${UPSTREAM_REPO}/releases?per_page=100" \
+                  | jq -r '.[].tag_name' \
+                  | grep -E '^release-[0-9]+\.[0-9]+\.[0-9]+-ATfE$' \
+                  | sed -E 's/^release-(.+)-ATfE$/\1/' \
+                  | sort -V | tail -n1)
+          fi
+          test -n "$ver" || { echo "::error::could not determine upstream ATfE version"; exit 1; }
+          current=$(sed -n 's/^pkgver=//p' PKGBUILD)
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if [ "$ver" = "$current" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already at ${ver}, nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Update ${current} -> ${ver}"
+          fi
+
+      - name: Update PKGBUILD (pkgver + sha256sums)
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          ver="${{ steps.upstream.outputs.version }}"
+          base="https://github.com/${UPSTREAM_REPO}/releases/download/release-${ver}-ATfE"
+          sha_x86=$(curl -fsSL "${base}/ATfE-${ver}-Linux-x86_64.tar.xz.sha256" | awk '{print $1}')
+          sha_arm=$(curl -fsSL "${base}/ATfE-${ver}-Linux-AArch64.tar.xz.sha256" | awk '{print $1}')
+          for s in "$sha_x86" "$sha_arm"; do
+            echo "$s" | grep -qE '^[0-9a-f]{64}$' || { echo "::error::unexpected checksum: ${s}"; exit 1; }
+          done
+          sed -i -e "s/^pkgver=.*/pkgver=${ver}/" \
+                 -e "s/^pkgrel=.*/pkgrel=1/" \
+                 -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${sha_x86}')/" \
+                 -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${sha_arm}')/" \
+                 PKGBUILD
+
+      - name: Build and validate in Arch container
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/work" -w /work archlinux:base-devel bash -c '
+            set -euo pipefail
+            useradd -m builder
+            chown -R builder /work
+            su - builder -c "cd /work && makepkg --printsrcinfo > .SRCINFO && makepkg -f --nodeps"
+          '
+          sudo chown -R "$(id -u):$(id -g)" .
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Commit to GitHub mirror
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "upgpkg: ${PKGNAME} ${{ steps.upstream.outputs.version }}-1"
+          git push
+
+      - name: Push to AUR
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur_ci
+          chmod 600 ~/.ssh/aur_ci
+          printf '%s\n' "$AUR_HOST_KEY" > ~/.ssh/aur_known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_ci -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/aur_known_hosts -o StrictHostKeyChecking=yes"
+          rm -rf /tmp/aur-pkg
+          git clone --depth=1 "ssh://aur@aur.archlinux.org/${PKGNAME}.git" /tmp/aur-pkg
+          cp PKGBUILD .SRCINFO "${PKGNAME}.install" .gitignore /tmp/aur-pkg/
+          cd /tmp/aur-pkg
+          git add -A
+          if git diff --cached --quiet; then
+            echo "AUR repository already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "upgpkg: ${PKGNAME} ${{ steps.upstream.outputs.version }}-1"
+          git push
+
+      - name: Keepalive (GitHub disables idle schedules after 60 days)
+        if: steps.upstream.outputs.changed != 'true'
+        run: |
+          set -euo pipefail
+          age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Last commit was ${age_days} day(s) ago"
+          if [ "$age_days" -ge 50 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive"
+            git push
+          fi
