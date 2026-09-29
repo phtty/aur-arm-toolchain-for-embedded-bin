@@ -8,7 +8,7 @@ package 本体：上游 [arm/arm-toolchain](https://github.com/arm/arm-toolchain
 
 ## 自动更新
 
-`.github/workflows/update.yml` 每周一自动检查上游 ATfE release：
+`.github/workflows/update.yml` 每天自动检查上游 ATfE release：
 
 1. 取最新的 `release-X.Y.Z-ATfE` 标签，并下载官方 `.sha256` 校验和
 2. 更新 `PKGBUILD` 的 `pkgver` / `sha256sums_*`（`pkgrel` 重置为 1）

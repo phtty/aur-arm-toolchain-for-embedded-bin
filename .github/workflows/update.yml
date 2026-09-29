@@ -3,8 +3,8 @@ name: Update AUR package
 
 on:
   schedule:
-    # 每周一 04:23 UTC 自动检查上游
-    - cron: '23 4 * * 1'
+    # 每天 04:23 UTC（北京时间 12:23）自动检查上游
+    - cron: '23 4 * * *'
   workflow_dispatch:
     inputs:
       version:
