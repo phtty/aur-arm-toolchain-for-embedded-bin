@@ -1,7 +1,7 @@
 # Maintainer: phtty <dzzwmqj@outlook.com>
 
 pkgname=arm-toolchain-for-embedded-bin
-pkgver=22.1.0
+pkgver=23.1.0
 pkgrel=1
 pkgdesc="LLVM-based bare-metal compiler toolchain for Arm (ATfE, binary release)"
 arch=('x86_64' 'aarch64')
@@ -19,8 +19,8 @@ _srcname_aarch64="ATfE-${pkgver}-Linux-AArch64"
 
 source_x86_64=("${url}/releases/download/${_release}/${_srcname_x86_64}.tar.xz")
 source_aarch64=("${url}/releases/download/${_release}/${_srcname_aarch64}.tar.xz")
-sha256sums_x86_64=('e2e9e637bba097ba6e4bae6982883fe705ffd7e8c3a7dc876964835ef1c7a724')
-sha256sums_aarch64=('ca73e75963bb90c4bc66d67b1875a05e120a8a4febf3db0ad5f09330fbffda17')
+sha256sums_x86_64=('a7be511613af15151c93961ad39c8cf9ae6889a453c8b547f42f4051a416dc8e')
+sha256sums_aarch64=('df3b055d05659d8fda710d820e6c1ceff7bca3234c5067abe82a16e781d8de99')
 
 package() {
   local _srcname
