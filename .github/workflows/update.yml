@@ -1,3 +1,4 @@
+# Keep the AUR package in sync with upstream ATfE releases from arm/arm-toolchain.
 name: Update AUR package
 
 on:
